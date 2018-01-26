@@ -1,7 +1,7 @@
 (defproject promising_helper "0.1.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
-  :main promising-paper.main
+  :main promising-helper.main
   :aot :all
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
