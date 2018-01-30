@@ -2,6 +2,7 @@
   (:require [promising-helper.input :as input])
   (:require [incanter.charts :as charts])
   (:require [incanter.core])
+  (:require [incanter.pdf :as pdf])
   )
 
 (defn positions
@@ -54,19 +55,20 @@
                        (input/parse-tsv (line-seq rdr)))))))
 
 (defn make-enrichment-figure
-  [truth ranked_list_mappings output_png_filename]
-  (let [f (fn [ranked_list] [(map #(/ (float %) (count ranked_list))
-                                  (range (count ranked_list)))
-                             (gsea-curve truth ranked_list)])]
-    (incanter.core/save
-     (reduce (fn [c [k ranked_list]]
-               (let [[x y] (f ranked_list)]
-                 (charts/add-lines c x y)))
-             (let [[k ranked_list] (first ranked_list_mappings)
-                   [x y] (f ranked_list)]
-               (charts/xy-plot x y))
-             (rest ranked_list_mappings))
-     output_png_filename)))
+  [truth ranked_list_mappings output_pdf_filename]
+  (let [ranked_list_mappings (sort-by first ranked_list_mappings)
+        f (fn [ranked_list] [(map #(/ (float %) (count ranked_list))
+                                 (range (count ranked_list)))
+                            (gsea-curve truth ranked_list)])]
+    (-> (reduce (fn [c [k ranked_list]]
+                 (let [[x y] (f ranked_list)]
+                   (charts/add-lines c x y :series-label k)))
+               (let [[k ranked_list] (first ranked_list_mappings)
+                     [x y] (f ranked_list)]
+                 (charts/xy-plot x y :legend true :series-label k
+                                 :y-label "Enrichment score" :x-label "Ranked genes"))
+               (rest ranked_list_mappings))
+       (pdf/save-pdf output_pdf_filename))))
 
 
 ;; (with-open [rdr (clojure.java.io/reader "../../monarch/t1d.tsv")]

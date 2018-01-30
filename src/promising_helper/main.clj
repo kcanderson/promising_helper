@@ -203,21 +203,19 @@
    ["-h" "--help"]])
 
 (defn make-enrichment-plot
-  [truth_filename all_results output_filename]
+  [truth_filename all_result_filenames output_filename]
   (let [truth (into #{} (clojure.string/split (slurp truth_filename) #"\s+"))
-        ;;ranked_genes (evaluation/ranked-genes results_filename)
-        ]
-    (evaluation/make-enrichment-figure truth all_results output_filename)))
+        ;;f #(apply str (rest (clojure.string/split % (re-pattern (java.io.File/separator)))))
+        f #(clojure.string/replace % (re-pattern (str ".*results" (java.io.File/separator))) "")
+        r (into {} (map #(vector (f %) (evaluation/ranked-genes %)) all_result_filenames))]
+    (evaluation/make-enrichment-figure truth r output_filename)))
 
 (defn enrichment-cmd
   [& args]
   (let [{:keys [options arguments errors summary]} (parse-opts args gseaplot_opts)]
     (if (options :help)
       (println summary)
-      (make-enrichment-plot (options :truth)
-                            {"promising" (evaluation/ranked-genes "/Users/kelsey/Code/reproduce_promising/results/promising/ad_string_reglap.tsv")
-                             "pf" (evaluation/ranked-genes "/Users/kelsey/Code/reproduce_promising/results/pf/ad_string.tsv")}
-                            (options :output)))))
+      (make-enrichment-plot (options :truth) arguments (options :output)))))
 
 ;; (defn validate-cmd
 ;;   [& args]
