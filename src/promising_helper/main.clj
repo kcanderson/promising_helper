@@ -42,8 +42,7 @@
       (make-genesets (first arguments)
                      (second arguments)
                      (options :rsquared)
-                     (options :flank)))
-    (System/exit 0)))
+                     (options :flank)))))
 
 (defn make-string-derived-network
   [string_filename threshold include_textmining? annotations_filename out_filename]
@@ -98,8 +97,7 @@
                                               (options :output))
         "pf" (make-pf-derived-network (options :input)
                                       (options :annotations)
-                                      (options :output))))
-    (System/exit 0)))
+                                      (options :output))))))
 
 
 (defn make-kernel-from-interaction-file
@@ -130,8 +128,7 @@
                                                                     (options :alpha)))
                              name_fn (zipmap (vals mapping) (keys mapping))]
                          (with-open [wrtr (clojure.java.io/writer (options :output))]
-                           (input/write-matrix-to-file (kern) wrtr name_fn)))))
-    (System/exit 0)))
+                           (input/write-matrix-to-file (kern) wrtr name_fn)))))))
 
 ;; MONARCH
 (def monarch_opts
@@ -145,14 +142,20 @@
     (if (options :help)
       (println summary)
       (spit (options :output)
-            (clojure.string/join "\n" (evaluation/monarch-causal-genes (options :input)))))
-    (System/exit 0)))
+            (clojure.string/join "\n" (evaluation/monarch-causal-genes (options :input)))))))
+
+;; (def validate_opts
+;;   [["-r" "--results RESULTS_DIR" "Directory containg prioritization results" :default ""]
+;;    ["-t" "--truth GROUND_TRUTH_DIR" "Directory containing known true genes files" :default ""]
+;;    ["-o" "--output " "File name for output" :default ""]
+;;    ["-p" "--pval ITERATIONS" "Permutations to run for p-val" :parse-fn #(Integer/parseInt %) :default 10000]
+;;    ["-h" "--help"]])
 
 (def validate_opts
-  [["-r" "--results RESULTS_DIR" "Directory containg prioritization results" :default ""]
-   ["-t" "--truth GROUND_TRUTH_DIR" "Directory containing known true genes files" :default ""]
-   ["-o" "--output " "File name for output" :default ""]
-   ["-p" "--pval ITERATIONS" "Permutations to run for p-val" :parse-fn #(Integer/parseInt %) :default 10000]
+  [["-r" "--results RESULTS_FILE" "File with results"]
+   ["-t" "--truth GROUND_TRUTH" "File with ground truth genes"]
+   ["-o" "--output OUTPUT_FILE" "File for output"]
+   ["-p" "--pval ITERATIONS" "Number of permutations for p-value" :default 1000 :parse-fn #(Integer/parseInt %)]
    ["-h" "--help"]])
 
 (defn match-results-monarch
@@ -171,32 +174,72 @@
   [results_file monarch_file iterations]
   (let [truth (into #{} (clojure.string/split (slurp monarch_file) #"\s+"))
         ranked_genes (evaluation/ranked-genes results_file)]
+    (println (count truth) (count ranked_genes) (count (clojure.set/intersection truth (into #{} ranked_genes))))
+    (println (take 10 ranked_genes))
     {"total genes" (count ranked_genes)
-     "truth genes" (count (clojure.set/intersection truth (into #{} ranked_genes)))
+     "truth genes" (count truth)
+     "intersection truth" (count (clojure.set/intersection truth (into #{} ranked_genes)))
      "p-val" (evaluation/gsea-p-value truth ranked_genes iterations)
      "enrichment score" (evaluation/gsea-enrichment-score truth ranked_genes)}))
 
 (defn validate-cmd
   [& args]
-  (let [{:keys [options arguments errors summary]} (parse-opts args validate_opts)
-        type_fn (fn [path]
-                  (let [v (clojure.string/split path (re-pattern (java.io.File/separator)))]
-                    (clojure.string/join ", " (take-last 2 (butlast v)))))
-        validate_results_fn (fn [tr all_rs]
-                              (into {} (map (fn [r]
-                                              [(type_fn r) (validate r tr (options :pval))])
-                                            all_rs)))]
+  (let [{:keys [options arguments errors summary]} (parse-opts args validate_opts)]
     (if (options :help)
       (println summary)
-      (with-open [wrtr (clojure.java.io/writer (options :output))]
-        (let [matches (match-results-monarch (options :results) (options :truth))
-              ks (map type_fn (second (second (first matches))))
-              header (cons "disease/phenotype" ks)]
-          (.write wrtr (str (clojure.string/join "\t" header) "\n"))
-          (doseq [[k [t rs]] matches]
-            (let [rvalidates (validate_results_fn t rs)]
-              (.write wrtr (str (clojure.string/join "\t" (cons k (map rvalidates ks))) "\n")))))))
-    (System/exit 0)))
+      (let [v (validate (options :results) (options :truth) (options :pval))]
+        (with-open [wrtr (clojure.java.io/writer (options :output))]
+          (.write wrtr (str "total genes\t" (v "total genes") "\n"))
+          (.write wrtr (str "num truth genes\t" (v "truth genes") "\n"))
+          (.write wrtr (str "num intersection\t" (v "intersection truth") "\n"))
+          (.write wrtr (str "enrichment score\t" (v "enrichment score") "\n"))
+          (.write wrtr (str "p-val\t" (v "p-val") "\n"))
+          )))))
+
+(def gseaplot_opts
+  [["-r" "--results RESULTS_FILE" "File with results"]
+   ["-t" "--truth GROUND_TRUTH" "File with ground truth genes"]
+   ["-o" "--output OUTPUT_PNG_FILE" "File for output"]
+   ["-h" "--help"]])
+
+(defn make-enrichment-plot
+  [truth_filename all_results output_filename]
+  (let [truth (into #{} (clojure.string/split (slurp truth_filename) #"\s+"))
+        ;;ranked_genes (evaluation/ranked-genes results_filename)
+        ]
+    (evaluation/make-enrichment-figure truth all_results output_filename)))
+
+(defn enrichment-cmd
+  [& args]
+  (let [{:keys [options arguments errors summary]} (parse-opts args gseaplot_opts)]
+    (if (options :help)
+      (println summary)
+      (make-enrichment-plot (options :truth)
+                            {"promising" (evaluation/ranked-genes "/Users/kelsey/Code/reproduce_promising/results/promising/ad_string_reglap.tsv")
+                             "pf" (evaluation/ranked-genes "/Users/kelsey/Code/reproduce_promising/results/pf/ad_string.tsv")}
+                            (options :output)))))
+
+;; (defn validate-cmd
+;;   [& args]
+;;   (let [{:keys [options arguments errors summary]} (parse-opts args validate_opts)
+;;         type_fn (fn [path]
+;;                   (let [v (clojure.string/split path (re-pattern (java.io.File/separator)))]
+;;                     (clojure.string/join ", " (take-last 2 (butlast v)))))
+;;         validate_results_fn (fn [tr all_rs]
+;;                               (into {} (map (fn [r]
+;;                                               [(type_fn r) (validate r tr (options :pval))])
+;;                                             all_rs)))]
+;;     (if (options :help)
+;;       (println summary)
+;;       (with-open [wrtr (clojure.java.io/writer (options :output))]
+;;         (let [matches (match-results-monarch (options :results) (options :truth))
+;;               ks (map type_fn (second (second (first matches))))
+;;               header (cons "disease/phenotype" ks)]
+;;           (.write wrtr (str (clojure.string/join "\t" header) "\n"))
+;;           (doseq [[k [t rs]] matches]
+;;             (let [rvalidates (validate_results_fn t rs)]
+;;               (.write wrtr (str (clojure.string/join "\t" (cons k (map rvalidates ks))) "\n")))))))
+;;     (System/exit 0)))
 
 ;; SNPs
 (def select_traits_opts
@@ -247,7 +290,8 @@
                                                            ["monarch" "Parse MONARCH data to grab causal relations"]
                                                            ["validate" "Perform GSEA on results"]
                                                            ["select-traits" "Select important traits from NHGRI GWAS table"]
-                                                           ["snps" "Pull out desired SNPs from NHGRI GWAS table"]])]
+                                                           ["snps" "Pull out desired SNPs from NHGRI GWAS table"]
+                                                           ["enrichment-figure" "Make enrichment plots from results"]])]
     (when (:help opts)
       (println help)
       (System/exit 0))
@@ -259,8 +303,10 @@
       :validate (apply validate-cmd args)
       :select-traits (apply select-traits-cmd args)
       :snps (apply snps-cmd args)
+      :enrichment-figure (apply enrichment-cmd args)
       (println (str "Invalid command. See 'foo --help'.\n\n"
-                    (candidate-message cands))))))
+                    (candidate-message cands))))
+    (System/exit 0)))
 
 ;; (def foo
 ;;   (with-open [rdr (clojure.java.io/reader "/home/kc/Code/Bioinformatics/interactome/musings/data/ncbi_ids.txt")]

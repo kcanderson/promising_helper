@@ -1,7 +1,7 @@
 (ns promising-helper.evaluation
   (:require [promising-helper.input :as input])
-  ;;(:require [incanter.charts :as charts])
-  ;;(:require [incanter.core])
+  (:require [incanter.charts :as charts])
+  (:require [incanter.core])
   )
 
 (defn positions
@@ -52,6 +52,22 @@
           (map #(get % "subject_label")
                (filter #(contains? good_relation_labels (get % "relation_label"))
                        (input/parse-tsv (line-seq rdr)))))))
+
+(defn make-enrichment-figure
+  [truth ranked_list_mappings output_png_filename]
+  (let [f (fn [ranked_list] [(map #(/ (float %) (count ranked_list))
+                                  (range (count ranked_list)))
+                             (gsea-curve truth ranked_list)])]
+    (incanter.core/save
+     (reduce (fn [c [k ranked_list]]
+               (let [[x y] (f ranked_list)]
+                 (charts/add-lines c x y)))
+             (let [[k ranked_list] (first ranked_list_mappings)
+                   [x y] (f ranked_list)]
+               (charts/xy-plot x y))
+             (rest ranked_list_mappings))
+     output_png_filename)))
+
 
 ;; (with-open [rdr (clojure.java.io/reader "../../monarch/t1d.tsv")]
 ;;   (def t1d_genes (into #{}

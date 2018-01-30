@@ -8,7 +8,7 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.climate/claypoole "1.1.4"]                 
                  [org.clojure/data.json "0.2.6"]
-                 [incanter "1.9.0"]
+                 [incanter "1.5.7"]
                  [clj-http "3.7.0"]
                  [cheshire "5.8.0"]
                  [org.clojure/tools.cli "0.3.5"]
