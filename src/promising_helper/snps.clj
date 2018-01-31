@@ -247,3 +247,9 @@
           selected (map #(first (get vals (Integer/parseInt %))) chosen)]
       (println (format "Selected: \n%s" (clojure.string/join "\n" selected)))
       selected)))
+
+(defn distance-to-snp
+  [snp ensembl_gene_id]
+  (let [gloc (gene-location ensembl_gene_id)
+        sloc (snp-location snp)]
+    [gloc sloc]))
