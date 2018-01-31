@@ -4,6 +4,8 @@
   (:require [clojure.data.json :as json])  
   (:require [com.climate.claypoole :as claypoole]))
 
+;; Number of allowable concurrent connections to ENSEMBL
+(def NUM_ENSEMBL_CONNECTIONS 7)
 (def ensembl_base "http://rest.ensembl.org/")
 
 ;; (defn- expand-region
@@ -213,11 +215,20 @@
 (defn snps-to-regions 
   [snp_ids r_squared flank]
   (let [snp_ids (filter #(= "rs" (subs % 0 2)) (into #{} snp_ids))
-        ld_fn #(let [ret (ld-region % r_squared)]
-                 (print (format "%s " %))
-                 (Thread/sleep 1000)
-                 ret)
-        regions (expand-regions flank (claypoole/pmap 7 ld_fn snp_ids))]
+        ;; ld_fn #(let [ret (ld-region % r_squared)]
+        ;;          (println (format "%s " %))
+        ;;          (Thread/sleep 1000)
+        ;;          ret)
+        ;; rgs (doall (map #(try (ld-region % r_squared)
+        ;;                       (catch Exception e nil)
+        ;;                 snp_ids))
+        ;;_ (println rgs)
+        regions (expand-regions flank
+                                (remove nil?
+                                        (claypoole/pmap NUM_ENSEMBL_CONNECTIONS
+                                                        #(try (ld-region % r_squared)
+                                                              (catch Exception e nil))
+                                                        snp_ids)))]
     (combine-intersecting-regions regions)))
 
 (defn snps-to-genesets
