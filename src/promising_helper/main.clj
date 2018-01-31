@@ -101,13 +101,13 @@
 
 
 (defn make-kernel-from-interaction-file
-  [interaction_filename alpha]
+  [interaction_filename kernel_fn]
   (with-open [rdr (clojure.java.io/reader interaction_filename)]
     (let [lines (map #(let [[i1 i2 score] (clojure.string/split % #"\t")]
                         [i1 i2 (Float/parseFloat score)])
                      (rest (line-seq rdr)))
           {mat :matrix mapping :mapping} (time (interactions-to-largest-connected-matrix lines))]
-      {:kernel (kernel/regularized-laplacian-kernel alpha mat)
+      {:kernel (kernel_fn mat)
        :mapping mapping})))
 
 (def kernel_opts
@@ -122,13 +122,15 @@
   (let [{:keys [options arguments errors summary]} (parse-opts args kernel_opts)]
     (if (options :help)
       (println summary)
-      (case (options :type)
-        "reglaplacian" (let [{kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
-                                                                    (options :input)
-                                                                    (options :alpha)))
-                             name_fn (zipmap (vals mapping) (keys mapping))]
-                         (with-open [wrtr (clojure.java.io/writer (options :output))]
-                           (input/write-matrix-to-file (kern) wrtr name_fn)))))))
+      (let [kern_fn (case (options :type)
+                      "reglaplacian" #(kernel/regularized-laplacian-kernel (options :alpha) %)
+                      "vonneumann" #(kernel/von-neumann-diffusion-kernel (options :alpha) %)
+                      "commutetime" #(kernel/commute-time-kernel %))
+            {kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
+                                                   (options :input) kern_fn))
+            name_fn (zipmap (vals mapping) (keys mapping))]
+        (with-open [wrtr (clojure.java.io/writer (options :output))]
+          (input/write-matrix-to-file (kern) wrtr name_fn))))))
 
 ;; MONARCH
 (def monarch_opts
@@ -158,17 +160,7 @@
    ["-p" "--pval ITERATIONS" "Number of permutations for p-value" :default 1000 :parse-fn #(Integer/parseInt %)]
    ["-h" "--help"]])
 
-(defn match-results-monarch
-  [results_dir monarch_dir]
-  (let [vf (fn [re path]
-             (filter (fn [f] (re-find re (.getPath f)))
-                     (file-seq (clojure.java.io/file path))))
-        fmap (fn [files] (group-by #(first (clojure.string/split (.getName %) #"\.")) files))
-        results (fmap (vf #".tsv" results_dir))
-        monarch (fmap (vf #".txt" monarch_dir))]
-    (into {} (map (fn [[k v]]
-                    [k [(.getPath (first v)) (map #(.getPath %) (results k))]])
-                  monarch))))
+
 
 (defn validate
   [results_file monarch_file iterations]
@@ -276,6 +268,45 @@
                   (clojure.string/join "\n" snps))
             ))))))
 
+(defn match-results-monarch
+  [results_dir monarch_dir]
+  (let [vf (fn [re path]
+             (filter (fn [f] (re-find re (.getPath f)))
+                     (file-seq (clojure.java.io/file path))))
+        fmap (fn [files] (group-by #(first (clojure.string/split (.getName %) #"[\._]")) files))
+        results (fmap (vf #".tsv" results_dir))
+        monarch (fmap (vf #".txt" monarch_dir))
+        file_fn #(clojure.string/join "_" (rest (clojure.string/split % #"_")))]
+    (into {} (map (fn [[k v]]
+                    [k {:truth (.getPath (first v))
+                        :results (into {} (map #(vector (file_fn (clojure.string/replace (.getPath %) ".tsv" ""))
+                                                        (.getPath %))
+                                               (results k)))}])
+                  monarch))))
+
+(def comparison_opts
+  [["-r" "--results RESULTS_DIRECTORY" "directory to search for results" :default ""]
+   ["-t" "--truth TRUTH_DIRECTORY" "ground truth directory"]
+   ["-o" "--output OUTPUT_FILE" "output file" :default ""]
+   ["-h" "--help"]])
+
+(defn comparison-cmd
+  [& args]
+  (let [{:keys [options arguments errors summary]} (parse-opts args comparison_opts)]
+    (if (options :help)
+      (println summary)
+      (let [matches (match-results-monarch (options :results) (options :truth))
+            ks (sort (keys (:results (second (first matches)))))]
+        (with-open [wrtr (clojure.java.io/writer (options :output))]
+          (.write wrtr (str (clojure.string/join "\t" (cons "disease/trait" ks)) "\n"))
+          (doseq [[k {t :truth r :results}] matches]
+            (let [truth (into #{} (clojure.string/split (slurp t) #"\s+"))]
+              (.write wrtr (str (clojure.string/join
+                                 "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))]
+                                                      (evaluation/gsea-enrichment-score truth r))
+                                                   ks)))
+                                "\n")))))))))
+
 (defn -main
   "Testing, 1, 2, 3!"
   [& args]
@@ -289,7 +320,8 @@
                                                            ["validate" "Perform GSEA on results"]
                                                            ["select-traits" "Select important traits from NHGRI GWAS table"]
                                                            ["snps" "Pull out desired SNPs from NHGRI GWAS table"]
-                                                           ["enrichment-figure" "Make enrichment plots from results"]])]
+                                                           ["enrichment-figure" "Make enrichment plots from results"]
+                                                           ["comparison" "Compare all methods"]])]
     (when (:help opts)
       (println help)
       (System/exit 0))
@@ -302,6 +334,7 @@
       :select-traits (apply select-traits-cmd args)
       :snps (apply snps-cmd args)
       :enrichment-figure (apply enrichment-cmd args)
+      :comparison (apply comparison-cmd args)
       (println (str "Invalid command. See 'foo --help'.\n\n"
                     (candidate-message cands))))
     (System/exit 0)))
