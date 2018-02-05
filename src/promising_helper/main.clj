@@ -271,16 +271,20 @@
             ))))))
 
 (defn match-results-monarch
-  [results_dir monarch_dir]
+  [results_dir monarch_dir validation_dir]
   (let [vf (fn [re path]
              (filter (fn [f] (re-find re (.getPath f)))
                      (file-seq (clojure.java.io/file path))))
         fmap (fn [files] (group-by #(first (clojure.string/split (.getName %) #"[\._]")) files))
         results (fmap (vf #".tsv" results_dir))
         monarch (fmap (vf #".txt" monarch_dir))
+        validation (fmap (vf #"_common.glist" validation_dir))
         file_fn #(clojure.string/join "_" (rest (clojure.string/split % #"_")))]
     (into {} (map (fn [[k v]]
                     [k {:truth (.getPath (first v))
+                        :validation (into {} (map #(vector (second (clojure.string/split (.getName %) #"_"))
+                                                           (.getPath %))
+                                                  (validation k)))
                         :results (into {} (map #(vector (file_fn (clojure.string/replace (.getPath %) ".tsv" ""))
                                                         (.getPath %))
                                                (results k)))}])
@@ -289,6 +293,7 @@
 (def comparison_opts
   [["-r" "--results RESULTS_DIRECTORY" "directory to search for results" :default ""]
    ["-t" "--truth TRUTH_DIRECTORY" "ground truth directory"]
+   ["-v" "--validation VALIDATION_DIRECTORY" "directory with common gene lists"]
    ["-o" "--output OUTPUT_FILE" "output file" :default ""]
    ["-h" "--help"]])
 
@@ -297,15 +302,18 @@
   (let [{:keys [options arguments errors summary]} (parse-opts args comparison_opts)]
     (if (options :help)
       (println summary)
-      (let [matches (match-results-monarch (options :results) (options :truth))
+      (let [matches (match-results-monarch (options :results) (options :truth) (options :validation))
             ks (sort (keys (:results (second (first matches)))))]
         (with-open [wrtr (clojure.java.io/writer (options :output))]
           (.write wrtr (str (clojure.string/join "\t" (cons "disease/trait" ks)) "\n"))
-          (doseq [[k {t :truth r :results}] matches]
+          (doseq [[k {t :truth r :results v :validation}] matches]
             (let [truth (into #{} (clojure.string/split (slurp t) #"\s+"))]
               (.write wrtr (str (clojure.string/join
-                                 "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))]
-                                                      (evaluation/gsea-enrichment-score truth r))
+                                 "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))
+                                                          common_filename (get v (second (clojure.string/split % #"_")))
+                                                          common (into #{} (clojure.string/split (slurp common_filename) #"\s+"))
+                                                          r_common (ranked-genes-in-set common r)]
+                                                      (evaluation/gsea-enrichment-score truth r_common))
                                                    ks)))
                                 "\n")))))))))
 
@@ -326,7 +334,7 @@
         (spit (options :output)
               (clojure.string/join "\n" (apply common-genes-among-results arguments)))
         (catch Exception e
-          (println "Error running command!\n" summary))))))
+          (println "Error running command!\n" (.getMessage e) "\n" summary))))))
 
 (defn -main
   "Testing, 1, 2, 3!"
