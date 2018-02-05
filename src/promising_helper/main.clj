@@ -158,34 +158,36 @@
    ["-t" "--truth GROUND_TRUTH" "File with ground truth genes"]
    ["-o" "--output OUTPUT_FILE" "File for output"]
    ["-p" "--pval ITERATIONS" "Number of permutations for p-value" :default 1000 :parse-fn #(Integer/parseInt %)]
+   ["-c" "--common COMMON_GENES_FILE" "File containing genes to be considered in validation"]
    ["-h" "--help"]])
 
-
+(defn ranked-genes-in-set
+  [s ranked_list]
+  (filter #(contains? s %) ranked_list))
 
 (defn validate
-  [results_file monarch_file iterations]
+  [results_file monarch_file iterations used_genes]
   (let [truth (into #{} (clojure.string/split (slurp monarch_file) #"\s+"))
-        ranked_genes (evaluation/ranked-genes results_file)]
-    (println (count truth) (count ranked_genes) (count (clojure.set/intersection truth (into #{} ranked_genes))))
-    (println (take 10 ranked_genes))
+        ranked_genes (evaluation/ranked-genes results_file)
+        common_ranked_genes (ranked-genes-in-set (into #{} used_genes) ranked_genes)]
     {"total genes" (count ranked_genes)
      "truth genes" (count truth)
      "intersection truth" (count (clojure.set/intersection truth (into #{} ranked_genes)))
-     "p-val" (evaluation/gsea-p-value truth ranked_genes iterations)
-     "enrichment score" (evaluation/gsea-enrichment-score truth ranked_genes)}))
+     "common genes for GSEA testing" (count common_ranked_genes)
+     "common genes intersection truth" (count (clojure.set/intersection truth (into #{} common_ranked_genes)))
+     "p-val" (evaluation/gsea-p-value truth common_ranked_genes iterations)
+     "enrichment score" (evaluation/gsea-enrichment-score truth common_ranked_genes)}))
 
 (defn validate-cmd
   [& args]
   (let [{:keys [options arguments errors summary]} (parse-opts args validate_opts)]
     (if (options :help)
       (println summary)
-      (let [v (validate (options :results) (options :truth) (options :pval))]
+      (let [c (into #{} (clojure.string/split (slurp (options :common)) #"\s+"))
+            v (validate (options :results) (options :truth) (options :pval) c)]
         (with-open [wrtr (clojure.java.io/writer (options :output))]
-          (.write wrtr (str "total genes\t" (v "total genes") "\n"))
-          (.write wrtr (str "num truth genes\t" (v "truth genes") "\n"))
-          (.write wrtr (str "num intersection\t" (v "intersection truth") "\n"))
-          (.write wrtr (str "enrichment score\t" (v "enrichment score") "\n"))
-          (.write wrtr (str "p-val\t" (v "p-val") "\n"))
+          (doseq [[k vv] v]
+            (.write wrtr (str k "\t" vv "\n")))
           )))))
 
 (def gseaplot_opts
@@ -307,6 +309,25 @@
                                                    ks)))
                                 "\n")))))))))
 
+(defn common-genes-among-results
+  [& results_files]
+  (apply clojure.set/intersection (map (comp (partial into #{}) evaluation/ranked-genes) results_files)))
+
+(def common_opts
+  [["-o" "--output OUTPUT_FILE" "output file" :default ""]
+   ["-h" "--help"]])
+
+(defn common-cmd
+  [& args]
+  (let [{:keys [options arguments errors summary]} (parse-opts args common_opts)]
+    (if (options :help)
+      (println summary)
+      (try
+        (spit (options :output)
+              (clojure.string/join "\n" (apply common-genes-among-results arguments)))
+        (catch Exception e
+          (println "Error running command!\n" summary))))))
+
 (defn -main
   "Testing, 1, 2, 3!"
   [& args]
@@ -321,7 +342,8 @@
                                                            ["select-traits" "Select important traits from NHGRI GWAS table"]
                                                            ["snps" "Pull out desired SNPs from NHGRI GWAS table"]
                                                            ["enrichment-figure" "Make enrichment plots from results"]
-                                                           ["comparison" "Compare all methods"]])]
+                                                           ["comparison" "Compare all methods"]
+                                                           ["commonalities" "Find common genes among results"]])]
     (when (:help opts)
       (println help)
       (System/exit 0))
@@ -335,6 +357,7 @@
       :snps (apply snps-cmd args)
       :enrichment-figure (apply enrichment-cmd args)
       :comparison (apply comparison-cmd args)
+      :commonalities (apply common-cmd args)
       (println (str "Invalid command. See 'foo --help'.\n\n"
                     (candidate-message cands))))
     (System/exit 0)))
