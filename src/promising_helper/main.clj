@@ -317,6 +317,44 @@
                                                    ks)))
                                 "\n")))))))))
 
+(defn node-degrees-from-network
+  [network_filename]
+  (with-open [rdr (clojure.java.io/reader network_filename)]
+    (reduce (fn [acc [g1 g2 amt]]
+              (let [amt (Float/parseFloat amt)
+                    v1 (get acc g1 00)
+                    v2 (get acc g2 0.0)]
+                (-> acc
+                   (assoc g1 (+ v1 amt))
+                   (assoc g2 (+ v2 amt)))))
+            {}
+            (map #(clojure.string/split % #"\t")
+                 (rest (line-seq rdr))))))
+
+(def degree_groups_opts
+  [["-n" "--network NETWORK_FILENAME" "file name for degree groups" :default ""]
+   ["-o" "--output OUTPUT_FILE" "output file" :default ""]
+   ["-s" "--size DEGREE_GROUP_SIZE" "number of genes per group"
+    :default 1000 :parse-fn #(Integer/parseInt %)]
+   ["-h" "--help"]])
+
+(defn degree-groups-cmd
+  [& args]
+  (let [{:keys [options arguments errors summary]} (parse-opts args degree_groups_opts)]
+    (if (options :help)
+      (println summary)
+      (let [degs (node-degrees-from-network (options :network))
+            sdegs (sort-by second degs)
+            groups (partition (options :size) (options :size) []  sdegs)]
+        (with-open [wrtr (clojure.java.io/writer (options :output))]
+          (doseq [[i grp] (map-indexed vector groups)]
+            (.write wrtr (clojure.string/join "\t" (concat [(str "Group " i)
+                                                            (format "Contains degrees %.1f to %.1f"
+                                                                    (second (first grp))
+                                                                    (second (last grp)))]
+                                                           (map first grp))))
+            (.write wrtr "\n")))))))
+
 (defn common-genes-among-results
   [& results_files]
   (apply clojure.set/intersection (map (comp (partial into #{}) evaluation/ranked-genes) results_files)))
@@ -351,7 +389,8 @@
                                                            ["snps" "Pull out desired SNPs from NHGRI GWAS table"]
                                                            ["enrichment-figure" "Make enrichment plots from results"]
                                                            ["comparison" "Compare all methods"]
-                                                           ["commonalities" "Find common genes among results"]])]
+                                                           ["commonalities" "Find common genes among results"]
+                                                           ["degree-groups" "Make degree groups GMT"]])]
     (when (:help opts)
       (println help)
       (System/exit 0))
@@ -366,6 +405,7 @@
       :enrichment-figure (apply enrichment-cmd args)
       :comparison (apply comparison-cmd args)
       :commonalities (apply common-cmd args)
+      :degree-groups (apply degree-groups-cmd args)
       (println (str "Invalid command. See 'foo --help'.\n\n"
                     (candidate-message cands))))
     (System/exit 0)))
