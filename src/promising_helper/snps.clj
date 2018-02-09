@@ -233,7 +233,8 @@
 
 (defn snps-to-genesets
   [snp_ids r_squared flank]
-  (merge-genesets (regions-to-genesets (snps-to-regions snp_ids r_squared flank))))
+  (remove (fn [[snps genes]] (empty? genes))
+          (merge-genesets (regions-to-genesets (snps-to-regions snp_ids r_squared flank)))))
 
 ;; (def foo
 ;;   (snps-to-genesets
