@@ -252,6 +252,7 @@
   [["-i" "--input SNPS_FILE" :default ""]
    ["-t" "--traits TRAITS_FILE" :default ""]
    ["-o" "--output OUTPUT_SNP_FILE" :default ""]
+   ["-p" "--pval PVALUE" :default 5e-8 :parse-fn #(Float/parseFloat %)]
    ["-h" "--help"]])
 
 (defn snps-cmd
@@ -265,6 +266,7 @@
           (let [v (filter #(contains? traits (% "DISEASE/TRAIT"))
                           (input/parse-tsv (line-seq rdr)))
                 v (filter #(not= "NR" (% "SNPS")) v)
+                v (filter #(<= (Float/parseFloat (% "P-VALUE")) (options :pval)) v)
                 snps (mapcat #(clojure.string/split (% "SNPS") #"; ") v)]
             (spit (options :output)
                   (clojure.string/join "\n" snps))
