@@ -25,9 +25,8 @@
 
 (defn adjacency-mat-kernel
   [mat]
-  (fn [groups]
-    (fn ([] mat)
-      ([i1 i2] (cmat/select mat i1 i2)))))
+  (fn ([] mat)
+    ([i1 i2] (cmat/select mat i1 i2))))
 
 (defn kernel-shell
   [kern]

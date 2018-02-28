@@ -1,4 +1,5 @@
 (ns promising-helper.snps
+  (:use [promising-helper.core])
   (:require [promising-helper.input :as input])
   (:require [clj-http.client :as client])  
   (:require [clojure.data.json :as json])  
@@ -124,22 +125,6 @@
 ;;                        rgs))
 ;;                 regions)))
 
-(defn merge-genesets
-  [genesets]
-  (reduce (fn [curr [snps gset]]
-            (let [intscts (remove (fn [[c_snps c_gset]]
-                                    (empty? (clojure.set/intersection gset c_gset)))
-                                  curr)]
-              (if (empty? intscts)
-                (assoc curr snps gset)
-                (let [ks (map first intscts)
-                      vls (map second intscts)]
-                  (assoc (apply dissoc curr ks)
-                         (apply concat (conj ks snps))
-                         (apply clojure.set/union (conj vls gset))))
-                )))
-          {}
-          genesets))
 
 (defn regions-to-genesets
   [regions]

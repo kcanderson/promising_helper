@@ -215,8 +215,6 @@
                    (rest lines)))
      :genename_map (into {} (map-indexed (fn [i g] [g i]) genes))}))
 
-
-
 (defn legitimate-chromosome-name
   [name]
   (< (count name) 3))
@@ -264,4 +262,188 @@
        (let [row (assoc (into [] (cmat/get-row mat i)) i 0)]
          (.write writer (str (clojure.string/join "\t" (map (comp str float) row))
                              "\n")))))))
+
+(defn mat-file-index-mapping
+  [mat_filename]
+  (with-open [rdr (clojure.java.io/reader mat_filename)]
+    (let [header (clojure.string/split (first (line-seq rdr)) #"\t")]
+      (into {} (map vector header (range))))
+    ))
+
+(defn mat-file-grab-entries
+  "edges: collection of [first second]"
+  [mat_filename edges]
+  (let [index (mat-file-index-mapping mat_filename)
+        rindex (into {}  (map (fn [[a b]] [b a]) index))
+        item_edges (reduce (fn [m [i1 i2]]
+                             (assoc m i1 (conj (get m i1 []) (index i2))))
+                           {}
+                           edges)
+        wanted_indices (into #{} (map index (keys item_edges)))]
+    (with-open [rdr (clojure.java.io/reader mat_filename)]
+      (into {}
+            (reduce (comp doall concat)
+                    (keep-indexed (fn [i line] (if (contains? wanted_indices i)
+                                                (map (fn [[i2 s]] [[(rindex i) (rindex i2)] (Float/parseFloat s)])
+                                                     (select-keys (into [] (clojure.string/split (clojure.string/trim line) #"\t")) (item_edges (rindex i))))
+                                                ))
+                                  (rest (line-seq rdr))))))))
+
+(defn parse-omim-phenotype-series
+  [series_lines]
+  (let [info_line (clojure.string/split (first series_lines) #" - ")
+        f #(clojure.string/split % #"\t")
+        ks (f (second series_lines))
+        genes (map #(zipmap ks (f %)) (rest (rest series_lines)))
+        ;;good_genes (remove #(contains? #{\? \{ \[} (first (get % "Phenotype"))) genes)
+        ]
+    {:disease_name (first info_line)
+     :phenotypic_series_id (second info_line)
+     :gene_names (map #(first (clojure.string/split (get % "Gene/Locus") #", ")) genes)
+     ;;:foo (first genes)
+     }))
+
+(defn read-omim-phenotypic-series
+  [lines]
+  (map parse-omim-phenotype-series
+       (butlast (rest (remove (comp empty? first) (partition-by (comp empty? clojure.string/trim) lines))))))
+
+(defn gene-chromosomal-distance
+  [gene_coordinates g1 g2]
+  (let [[chr1 l1] ((first gene_coordinates) g1)
+        [chr2 l2] ((first gene_coordinates) g2)]
+    (if (= chr1 chr2)
+      (java.lang.Math/abs (- l1 l2)))))
+
+;; (defn remove-close-genes
+;;   [gene_coordinates dist_threshold genes]
+;;   (let [real_genes (keep #(if (nil? ((first gene_coordinates) %)) nil %) genes)]
+;;     (loop [[g0 & grem] real_genes
+;;            good_genes []]
+;;       (if (nil? g0) good_genes
+;;           (let [d (remove nil?
+;;                           (map (partial gene-chromosomal-distance
+;;                                         gene_coordinates g0)
+;;                                grem))]
+;;             (cond
+;;               (empty? d) (recur grem (conj good_genes g0))
+;;               (< (apply min d) dist_threshold) (recur grem good_genes)
+;;               :else (recur grem (conj good_genes g0))))))))
+
+(defn index-locations
+  [sorted_gene_locations]
+  (into {}
+        (map-indexed
+         (fn [i g]
+           [(get-in g [:extra :gene_id]) (list (g :chromosome) i)])
+         sorted_gene_locations)))
+
+
+(defn sort-by-chromosome
+  [gene_locations]
+  (let [chr_map (group-by :chromosome gene_locations)]
+    (reduce (fn [[cmap locs] [chr genes]]
+              (let [s (vec (sort-by :start genes))]
+                (list (merge cmap (index-locations s))
+                      (assoc locs chr s))))
+            (list {} {}) chr_map)))
+
+;; (defn gtf-group-by-gene
+;;   [gtf_parsed_lines]
+;;   (vals
+;;    (reduce (fn [m x]
+;;              (let [k (x :ensembl_gene_id)
+;;                    pid (x :protein_id)
+;;                    v (get m k (-> x
+;;                                  (assoc :exons [])
+;;                                  (assoc :protein_ids #{})
+;;                                  (dissoc :protein_id)))]
+;;                (assoc m k (-> v
+;;                              (assoc :start (min (v :start) (x :start)))
+;;                              (assoc :end (max (v :end) (x :end)))
+;;                              (assoc :protein_ids (conj (v :protein_ids) pid))
+;;                              ;; TODO: Add exon information
+;;                              ;;(assoc :exons (conj ))
+;;                              ))))
+;;            {}
+;;            gtf_parsed_lines)))
+
+(defn halve
+  [n]
+  (int (/ n 2)))
+
+(defn grab-nearest-n
+  [chromosome_map [chr index] num]
+  (let [start (max 0 (- index (halve (inc num))))
+        cmap ((second chromosome_map) chr)
+        n (count cmap)
+        gene_name_fn #(get-in % [:extra :gene_name])]
+    (loop [i start
+           s #{(gene_name_fn (get cmap index))}
+           m [(get cmap index)]]
+      (cond
+        (or (>= i n) (= (count s) num)) m
+        (contains? s (gene_name_fn (get cmap i))) (recur (inc i) s m)
+        :else (let [val (get cmap i)]
+                (recur (inc i) (conj s (gene_name_fn val)) (conj m val)))))))
+
+(defn get-locus
+  [chromosome_map num]
+  (let [[mapper coords] chromosome_map]
+    (fn [ensembl_gene_id]
+      (let [loc (mapper ensembl_gene_id)]
+        (if (not (nil? loc))
+          (grab-nearest-n chromosome_map loc num))))))
+
+(defn add-loci
+  [gene_coordinates locus_size max_num_loci omim]
+  (let [genes (take max_num_loci (shuffle (omim :ensembl_gene_ids)))
+        loci (map (comp (fn [locus] (map #(get-in % [:extra :gene_id]) locus))
+                        (get-locus gene_coordinates locus_size))
+                  genes)]
+    (assoc omim :loci loci)))
+
+(defn omim-add-ensembl-ids-xform
+  [name_ensembl_map]
+  (map #(assoc % :ensembl_gene_ids
+               (into #{}  (remove nil? (map name_ensembl_map (get % :gene_names)))))))
+
+(defn omim-filter-few-genes-xform
+  [min_num_genes]
+  (filter #(>= (count (get % :loci)) min_num_genes)))
+
+(defn add-loci-xform
+  [gene_coords locus_size max_num_loci]
+  (map (partial add-loci gene_coords locus_size max_num_loci)))
+
+(def merge_loci_xform
+  (let [f (fn [loci] (vals (merge-genesets
+                           (into {}  (map-indexed (fn [i l] [[i] (into #{} l)]) loci)))))]
+    (map #(assoc % :loci (f (% :loci))))
+    ))
+
+(defn omim-entries-add-loci
+  [ensembl_coords ensembl_name2g_map locus_size omim_entries]
+  (sequence (comp (omim-add-ensembl-ids-xform ensembl_name2g_map)
+                  (add-loci-xform ensembl_coords locus_size 30)
+                  merge_loci_xform
+                  (omim-filter-few-genes-xform 3))
+            omim_entries))
+
+;;(println (take 1 (omim-entries-add-loci bar ensembl_name2g_map 10 omim)))
+
+;; (with-open [rdr (clojure.java.io/reader "../../annotations/Homo_sapiens.GRCh37.70.with.entrezid.gtf")]
+;;   (def foo (gtf-read-lines (line-seq rdr))))
+
+;; (with-open [rdr (clojure.java.io/reader "../../omim/phenotypic-series-all.txt")]            
+;;   (def omim (read-omim-phenotypic-series (line-seq rdr))))
+;; (def ensembl_name2g_map
+;;   (into {} (map (fn [x] [(get-in x [:extra :gene_name]) (get-in x [:extra :gene_id])]) foo))
+;;   )
+;; (def bar (sort-by-chromosome foo))
+;; (sequence (comp (omim-add-ensembl-ids-xform ensembl_name2g_map)
+;;                 (omim-filter-few-genes-xform 3)
+;;                 (add-loci-xform bar 10 20)
+;;                 merge-loci-xform)
+;;           (take 10 omim))
 

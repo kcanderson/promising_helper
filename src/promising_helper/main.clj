@@ -1,6 +1,7 @@
 (ns promising-helper.main
   (:gen-class)
   (:use [promising-helper.core])
+  (:require [clojure.java.io :as io])
   (:require [promising-helper.snps :as snp])
   (:require [promising-helper.input :as input])
   (:require [promising-helper.kernels :as kernel])
@@ -47,7 +48,7 @@
 (defn make-string-derived-network
   [string_filename threshold include_textmining? annotations_filename out_filename]
   (println (format "------ Reading annotations from %s ------" annotations_filename))
-  (let [protein_mapping (with-open [rdr (clojure.java.io/reader annotations_filename)]
+  (let [protein_mapping (with-open [rdr (io/reader annotations_filename)]
                           (into {} (map (fn [x] [(get-in x [:extra :protein_id])
                                                 (get-in x [:extra :gene_name])])
                                         (input/gtf-read-lines (line-seq rdr)))))
@@ -103,9 +104,10 @@
 (defn make-kernel-from-interaction-file
   [interaction_filename kernel_fn]
   (with-open [rdr (clojure.java.io/reader interaction_filename)]
-    (let [lines (map #(let [[i1 i2 score] (clojure.string/split % #"\t")]
-                        [i1 i2 (Float/parseFloat score)])
-                     (rest (line-seq rdr)))
+    (let [lines (remove (fn [[i1 i2 score]] (= i1 i2))
+                        (map #(let [[i1 i2 score] (clojure.string/split % #"\t")]
+                                [i1 i2 (Float/parseFloat score)])
+                             (rest (line-seq rdr))))
           {mat :matrix mapping :mapping} (time (interactions-to-largest-connected-matrix lines))]
       {:kernel (kernel_fn mat)
        :mapping mapping})))
@@ -125,7 +127,8 @@
       (let [kern_fn (case (options :type)
                       "reglaplacian" #(kernel/regularized-laplacian-kernel (options :alpha) %)
                       "vonneumann" #(kernel/von-neumann-diffusion-kernel (options :alpha) %)
-                      "commutetime" #(kernel/commute-time-kernel %))
+                      "commutetime" #(kernel/commute-time-kernel %)
+                      "adjacency" #(kernel/adjacency-mat-kernel %))
             {kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
                                                    (options :input) kern_fn))
             name_fn (zipmap (vals mapping) (keys mapping))]
@@ -376,6 +379,67 @@
         (catch Exception e
           (println "Error running command!\n" (.getMessage e) "\n" summary))))))
 
+(def entries_from_kernel_opts
+  [["-m" "--matrix MATRIX_FILENAME" "Kernel mat file"]
+   ["-e" "--edges EDGES_FILENAME"]
+   ["-o" "--output OUTPUT_FILENAME" "Output file for edges grabbed from kernel"]
+   ["-h" "--help"]])
+
+(defn entries-from-kernel-cmd
+  [& args]
+  (let [{:keys [options arguments errors summary]} (parse-opts args entries_from_kernel_opts)]
+    (if (options :help)
+      (println summary)
+      (let [edges (map #(take 2 (clojure.string/split % #"\t"))
+                       (clojure.string/split (slurp (options :edges)) #"\n"))
+            _ (println (take 10 edges))
+            entries (input/mat-file-grab-entries (options :matrix) edges)
+            _ (println (take 5 entries))]
+        (with-open [wrtr (clojure.java.io/writer (options :output))]
+          (doseq [[[i1 i2] s] entries]
+            (.write wrtr (str (clojure.string/join "\t" [i1 i2 s]) "\n"))
+            ))))))
+
+(def omim_opts
+  [["-i" "--input PHENOTYPIC_SERIES" "OMIM phenotypic series file"]
+   ["-n" "--num GENES_PER_LOCUS" "Number of genes per locus" :parse-fn #(Integer/parseInt %) :default 25]
+   ["-a" "--annotations GTF_ANNOTATIONS" "Gene annotations"]
+   ["-g" "--geneset GENESET_DIRECTORY" "Output directory to place gmt files"]
+   ["-t" "--truth TRUTH_DIRECTORY" "Output directory to place true gene txt files"]
+   ["-h" "--help"]])
+
+(defn omim-cmd
+  [& args]
+  (let [{:keys [options arguments errors summary]} (parse-opts args omim_opts)]
+    (if (options :help)
+      (println summary)
+      (let [ensembl (with-open [rdr (io/reader (options :annotations))]
+                      (input/gtf-read-lines (line-seq rdr)))
+            ensembl_coords (input/sort-by-chromosome ensembl)
+            omim (with-open [rdr (clojure.java.io/reader (options :input))]            
+                   (input/read-omim-phenotypic-series (line-seq rdr)))
+            ensembl_name2g_map (into {} (map (fn [x] [(get-in x [:extra :gene_name])
+                                                     (get-in x [:extra :gene_id])])
+                                             ensembl))
+            loci_omim (input/omim-entries-add-loci ensembl_coords ensembl_name2g_map (options :num) omim)
+            g2n (into {} (map (fn [[a b]] [b a]) ensembl_name2g_map))]
+        (doseq [o loci_omim]
+          (let [filename (-> (str "omim-" (o :disease_name))
+                            (clojure.string/replace "(" "-")
+                            (clojure.string/replace ")" "-")
+                            (clojure.string/replace "/" "-")
+                            (clojure.string/replace " " "-")
+                            )]
+            (spit (str (options :truth) (java.io.File/separator) filename ".txt")
+                  (clojure.string/join "\n" (o :gene_names)))
+            (with-open [wrtr (io/writer (str (options :geneset) (java.io.File/separator) filename ".gmt"))]
+              (doseq [[i l] (map-indexed vector (o :loci))]
+                (.write wrtr (clojure.string/join "\t" (concat [(str (o :disease_name) " locus " i)
+                                                           (str "Locus for "
+                                                                (clojure.string/join ", " (map g2n (clojure.set/intersection l (into #{} (o :ensembl_gene_ids))))))]
+                                                               (remove empty? (map g2n l)))))
+                (.write wrtr "\n")))))))))
+        
 (defn -main
   "Testing, 1, 2, 3!"
   [& args]
@@ -392,7 +456,9 @@
                                                            ["enrichment-figure" "Make enrichment plots from results"]
                                                            ["comparison" "Compare all methods"]
                                                            ["commonalities" "Find common genes among results"]
-                                                           ["degree-groups" "Make degree groups GMT"]])]
+                                                           ["degree-groups" "Make degree groups GMT"]
+                                                           ["entries-from-kernel" "Grab edges from kernel"]
+                                                           ["omim-genesets-cmd" "Make genesets from OMIM phenotypic series"]])]
     (when (:help opts)
       (println help)
       (System/exit 0))
@@ -408,10 +474,12 @@
       :comparison (apply comparison-cmd args)
       :commonalities (apply common-cmd args)
       :degree-groups (apply degree-groups-cmd args)
+      :entries-from-kernel (apply entries-from-kernel-cmd args)
+      :omim-genesets-cmd (apply omim-cmd args)
       (println (str "Invalid command. See 'foo --help'.\n\n"
                     (candidate-message cands))))
     (System/exit 0)))
-
+  
 ;; (def foo
 ;;   (with-open [rdr (clojure.java.io/reader "/home/kc/Code/Bioinformatics/interactome/musings/data/ncbi_ids.txt")]
 ;;     (into {}
