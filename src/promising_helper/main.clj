@@ -128,7 +128,10 @@
                       "reglaplacian" #(kernel/regularized-laplacian-kernel (options :alpha) %)
                       "vonneumann" #(kernel/von-neumann-diffusion-kernel (options :alpha) %)
                       "commutetime" #(kernel/commute-time-kernel %)
-                      "adjacency" #(kernel/adjacency-mat-kernel %))
+                      "adjacency" #(kernel/adjacency-mat-kernel %)
+                      "shortestpath" #(kernel/shortest-path-kernel %)
+                      "expdiffusion" #(kernel/exponential-diffusion-kernel (options :alpha) %)
+                      )
             {kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
                                                    (options :input) kern_fn))
             name_fn (zipmap (vals mapping) (keys mapping))]
