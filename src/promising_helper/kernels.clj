@@ -72,6 +72,6 @@
   (let [[m n] (cmat/shape mat)
         kern (cmat/inverse
               (cmat/add (cmat/identity-matrix m)
-                        (cmat/mul alpha (normalized-laplacian-matrix mat))))]
+                        (cmat/mul alpha (laplacian-matrix mat))))]
     (kernel-shell kern)))
 
