@@ -26,7 +26,7 @@
 (defn normalized-laplacian-matrix
   [mat]
   (let [d (cmat/emap! #(Math/sqrt %) (degree-matrix mat))
-        v (cmat/mul (cmat/inverse d) mat d)
+        v (cmat/mmul (cmat/inverse d) mat d)
         [m n] (cmat/shape mat)]
     (cmat/add (cmat/identity-matrix m)
               (cmat/mul -1 v))))
@@ -72,6 +72,6 @@
   (let [[m n] (cmat/shape mat)
         kern (cmat/inverse
               (cmat/add (cmat/identity-matrix m)
-                        (cmat/mul alpha (laplacian-matrix mat))))]
+                        (cmat/mul alpha (normalized-laplacian-matrix mat))))]
     (kernel-shell kern)))
 
