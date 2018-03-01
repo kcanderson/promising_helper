@@ -23,6 +23,14 @@
   (cmat/add (cmat/mul -1 mat)
             (degree-matrix mat)))
 
+(defn normalized-laplacian-matrix
+  [mat]
+  (let [d (cmat/emap! #(Math/sqrt %) (degree-matrix mat))
+        v (cmat/mul (cmat/inverse d) mat d)
+        [m n] (cmat/shape mat)]
+    (cmat/add (cmat/identity-matrix m)
+              (cmat/mul -1 v))))
+
 (defn adjacency-mat-kernel
   [mat]
   (fn ([] mat)
