@@ -131,6 +131,7 @@
                       "adjacency" #(kernel/adjacency-mat-kernel %)
                       "shortestpath" #(kernel/shortest-path-kernel %)
                       "expdiffusion" #(kernel/exponential-diffusion-kernel (options :alpha) %)
+                      "lapexpdiffusion" #(kernel/laplacian-exponential-diffusion-kernel (options :alpha) %)
                       )
             {kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
                                                    (options :input) kern_fn))

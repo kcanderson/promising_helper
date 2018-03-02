@@ -18,6 +18,10 @@
     (cmat/diagonal-matrix 
      (cmat/eseq (cmat/mmul mat (ones-matrix m 1))))))
 
+(defn matrix-pow
+  [mat p]
+  (iterate ))
+
 (defn matrix-exp
   [mat]
   (reduce (fn [mr [m k i]]
@@ -164,13 +168,12 @@
                     (pop q) neighbors))))))))
 
 (defn shortest-path-kernel
-  ([mat] (shortest-path-kernel #(if (zero? %) Float/MAX_VALUE (/ 1.0 %)) mat))
+  ([mat] (shortest-path-kernel #(/ 1.0 (+ 1.0 %)) mat))
   ([dist_to_sim_fn mat]
    (let [[m n] (cmat/shape mat)
          start_fn (propogate-distances-from-start mat)
          kern (reduce (fn [k start]
-                        (do (if (zero? (mod start 10))
-                              (println start))
+                        (do (println start)
                             (start_fn k start)))
                       (cmat/add infinity (cmat/zero-matrix m n))
                       (range m))
@@ -179,5 +182,10 @@
        ([] kern)
        ([i1 i2] (cmat/select kern i1 i2))))))
 
-
-
+(defn p-step-random-walk-kernel
+  [p a mat]
+  (let [[m n] (cmat/shape mat)
+        b (cmat/add (cmat/mul a (cmat/identity-matrix m))
+                    (cmat/mul -1.0 (normalized-laplacian-matrix mat)))]
+    
+    ))
