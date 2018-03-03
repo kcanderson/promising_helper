@@ -132,6 +132,8 @@
                       "shortestpath" #(kernel/shortest-path-kernel %)
                       "expdiffusion" #(kernel/exponential-diffusion-kernel (options :alpha) %)
                       "lapexpdiffusion" #(kernel/laplacian-exponential-diffusion-kernel (options :alpha) %)
+                      "cosine" #(kernel/cosine-kernel %)
+                      "randomwalk" #(kernel/p-step-random-walk-kernel 3 (options :alpha) %)
                       )
             {kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
                                                    (options :input) kern_fn))
