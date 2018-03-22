@@ -188,14 +188,14 @@
   ([mat] (shortest-path-kernel mat (memoize (partial get-neighbors mat))))
   ([mat neighbor_fn]
    (let [[m n] (cmat/shape mat)
-         kern (cmat/mul -1 (cmat/matrix
-                            (pmap (fn [i]
-                                    (do (if (zero? (mod i 100)) (println i))
-                                        (shortest-paths-from
-                                         m
-                                         (partial cmat/mget mat)
-                                         neighbor_fn i)))
-                                  (range m))))]
+         kern (cmat/matrix
+               (pmap (fn [i]
+                       (do (if (zero? (mod i 100)) (println i))
+                           (shortest-paths-from
+                            m
+                            (partial cmat/mget mat)
+                            neighbor_fn i)))
+                     (range m)))]
      (kernel-shell kern))))
 
 (defn p-step-random-walk-kernel

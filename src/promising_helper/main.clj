@@ -174,6 +174,13 @@
   [s ranked_list]
   (filter #(contains? s %) ranked_list))
 
+(defn relative-ranks-of
+  [wanted ranked_coll]
+  (let [wanted_set (into #{} wanted)]
+    (keep-indexed (fn [i v]
+                    (if (contains? wanted_set v) [v (/ (float i) (count ranked_coll))]))
+                  ranked_coll)))
+
 (defn validate
   [results_file monarch_file iterations used_genes]
   (let [truth (into #{} (clojure.string/split (slurp monarch_file) #"\s+"))
@@ -185,7 +192,15 @@
      "common genes for GSEA testing" (count common_ranked_genes)
      "common genes intersection truth" (count (clojure.set/intersection truth (into #{} common_ranked_genes)))
      "p-val" (evaluation/gsea-p-value truth common_ranked_genes iterations)
-     "enrichment score" (evaluation/gsea-enrichment-score truth common_ranked_genes)}))
+     "enrichment score" (evaluation/gsea-enrichment-score truth common_ranked_genes)
+     "relative ranks" (into [] (relative-ranks-of truth common_ranked_genes))}))
+
+
+;; (validate "/home/kc/Code/Bioinformatics/reproduce_promising/results/omim-Fanconi-anemia/promising/omim-Fanconi-anemia_promising_stringnotm.tsv"
+;;           "/home/kc/Code/Bioinformatics/reproduce_promising/monarch_derived/omim-Fanconi-anemia.txt" 100
+;;           (clojure.string/split (slurp "/home/kc/Code/Bioinformatics/reproduce_promising/validation/omim-Fanconi-anemia/omim-Fanconi-anemia_stringnotm_common.glist")
+;;                                 #"\n"))
+
 
 (defn validate-cmd
   [& args]
@@ -318,15 +333,18 @@
         (with-open [wrtr (clojure.java.io/writer (options :output))]
           (.write wrtr (str (clojure.string/join "\t" (cons "disease/trait" ks)) "\n"))
           (doseq [[k {t :truth r :results v :validation}] matches]
-            (let [truth (into #{} (clojure.string/split (slurp t) #"\s+"))]
-              (.write wrtr (str (clojure.string/join
-                                 "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))
-                                                          common_filename (get v (second (clojure.string/split % #"_")))
-                                                          common (into #{} (clojure.string/split (slurp common_filename) #"\s+"))
-                                                          r_common (ranked-genes-in-set common r)]
-                                                      (evaluation/gsea-enrichment-score truth r_common))
-                                                   ks)))
-                                "\n")))))))))
+            (try
+              (let [truth (into #{} (clojure.string/split (slurp t) #"\s+"))]
+                (.write wrtr (str (clojure.string/join
+                                   "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))
+                                                            common_filename (get v (second (clojure.string/split % #"_")))
+                                                            common (into #{} (clojure.string/split (slurp common_filename) #"\s+"))
+                                                            r_common (ranked-genes-in-set common r)]
+                                                        (evaluation/gsea-enrichment-score truth r_common))
+                                                     ks)))
+                                  "\n")))
+              (catch Exception e (println k))))))
+        )))
 
 (defn node-degrees-from-network
   [network_filename]

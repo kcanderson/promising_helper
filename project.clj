@@ -15,6 +15,7 @@
                  [clj-sub-command "0.3.0"]
                  [net.mikera/core.matrix "0.61.0"]
                  ;;[cav/mtj "0.4.2-KC-PATCH"]
+                 [org.clojars.mthomure/mtj "0.4.3-SNAPSHOT"]
                  [clatrix "0.5.0"]
                  ;;[nd4clj "0.1.0-SNAPSHOT"]
                  ;;[uncomplicate/neanderthal "0.18.0"]
