@@ -76,8 +76,31 @@
           (if (and (not (nil? (f a))) (not (nil? (f b))))
             (.write wrtr (format "%s\t%s\t1.0\n" (f a) (f b)))))))))
 
+(defn make-inweb-derived-network
+  [inweb_filename out_filename]
+  (let [line-fn (fn [line]
+                  (try
+                    (let [gene-name-fn #(-> %
+                                           (subs 10)                                
+                                           (clojure.string/split #"\(gene")
+                                           first)
+                          v (clojure.string/split line #"\t")
+                          names (filter #(clojure.string/includes? % "(gene name)") v)
+                          g1 (gene-name-fn (first names))
+                          g2 (gene-name-fn (second names))]
+                      (list (list g1 g2)  (Float/parseFloat
+                                           (first (clojure.string/split (last (butlast v)) #"\|")))))
+                    (catch Exception e (println "Error with" line))))]
+    (with-open [rdr (clojure.java.io/reader inweb_filename)
+                wrtr (clojure.java.io/writer out_filename)]
+      (.write wrtr "gene1\tgene2\tscore\n")
+      (doseq [[[g1 g2] score] (remove nil? (map line-fn
+                                                (line-seq rdr)))]
+             (.write wrtr (str g1 "\t" g2 "\t" score "\n")))
+      )))
+
 (def network_opts
-  [["-t" "--type NETWORK_TYPE" "network type: string, pf, or " :default "string" :parse-fn identity]
+  [["-t" "--type NETWORK_TYPE" "network type: string, pf, or inweb" :default "string" :parse-fn identity]
    ["-a" "--annotations GTF_FILE" "GTF ENSEMBL annotations" :default "" :parse-fn identity]
    ["-m" "--textmining" "Include text mining" :default false]
    ["-i" "--input INPUT_NETWORK" "Input network file" :default "" :parse-fn identity]
@@ -98,7 +121,9 @@
                                               (options :output))
         "pf" (make-pf-derived-network (options :input)
                                       (options :annotations)
-                                      (options :output))))))
+                                      (options :output))
+        "inweb" (make-inweb-derived-network (options :input)
+                                            (options :output))))))
 
 
 (defn make-kernel-from-interaction-file
@@ -185,15 +210,18 @@
   [results_file monarch_file iterations used_genes]
   (let [truth (into #{} (clojure.string/split (slurp monarch_file) #"\s+"))
         ranked_genes (evaluation/ranked-genes results_file)
-        common_ranked_genes (ranked-genes-in-set (into #{} used_genes) ranked_genes)]
+        common_ranked_genes (ranked-genes-in-set (into #{} used_genes) ranked_genes)
+        truth_common (clojure.set/intersection truth (into #{} common_ranked_genes))
+        ;;common_ranked_genes ranked_genes
+        ]
     {"total genes" (count ranked_genes)
      "truth genes" (count truth)
      "intersection truth" (count (clojure.set/intersection truth (into #{} ranked_genes)))
      "common genes for GSEA testing" (count common_ranked_genes)
-     "common genes intersection truth" (count (clojure.set/intersection truth (into #{} common_ranked_genes)))
-     "p-val" (evaluation/gsea-p-value truth common_ranked_genes iterations)
-     "enrichment score" (evaluation/gsea-enrichment-score truth common_ranked_genes)
-     "relative ranks" (into [] (relative-ranks-of truth common_ranked_genes))}))
+     "common genes intersection truth" (count truth_common)
+     "p-val" (evaluation/gsea-p-value truth_common ranked_genes iterations)
+     "enrichment score" (evaluation/gsea-enrichment-score truth_common ranked_genes)
+     "relative ranks" (into [] (relative-ranks-of truth_common ranked_genes))}))
 
 
 ;; (validate "/home/kc/Code/Bioinformatics/reproduce_promising/results/omim-Fanconi-anemia/promising/omim-Fanconi-anemia_promising_stringnotm.tsv"
@@ -339,8 +367,10 @@
                                    "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))
                                                             common_filename (get v (second (clojure.string/split % #"_")))
                                                             common (into #{} (clojure.string/split (slurp common_filename) #"\s+"))
-                                                            r_common (ranked-genes-in-set common r)]
-                                                        (evaluation/gsea-enrichment-score truth r_common))
+                                                            r_common (ranked-genes-in-set common r)
+                                                            truth_common (clojure.set/intersection common truth)
+                                                            ]
+                                                        (evaluation/gsea-enrichment-score truth_common r))
                                                      ks)))
                                   "\n")))
               (catch Exception e (println k))))))
