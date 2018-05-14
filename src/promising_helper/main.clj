@@ -159,6 +159,7 @@
                       "lapexpdiffusion" #(kernel/laplacian-exponential-diffusion-kernel (options :alpha) %)
                       "cosine" #(kernel/cosine-kernel %)
                       "randomwalk" #(kernel/p-step-random-walk-kernel 3 (options :alpha) %)
+                      "amat" kernel/amat-kernel
                       )
             {kern :kernel mapping :mapping} (time (make-kernel-from-interaction-file
                                                    (options :input) kern_fn))
@@ -364,16 +365,18 @@
             (try
               (let [truth (into #{} (clojure.string/split (slurp t) #"\s+"))]
                 (.write wrtr (str (clojure.string/join
-                                   "\t" (cons k (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))
-                                                            common_filename (get v (second (clojure.string/split % #"_")))
-                                                            common (into #{} (clojure.string/split (slurp common_filename) #"\s+"))
-                                                            r_common (ranked-genes-in-set common r)
-                                                            truth_common (clojure.set/intersection common truth)
-                                                            ]
-                                                        (evaluation/gsea-enrichment-score truth_common r))
-                                                     ks)))
+                                   "\t" (cons k (doall (map #(let [r (if (get r %) (evaluation/ranked-genes (get r %)))
+                                                                   common_filename (get v (second (clojure.string/split % #"_")))
+                                                                   common (into #{} (clojure.string/split (slurp common_filename) #"\s+"))
+                                                                   r_common (ranked-genes-in-set common r)
+                                                                   truth_common (clojure.set/intersection common truth)
+                                                                   ]
+                                                               (evaluation/gsea-enrichment-score truth_common r_common)
+                                                               ;;(evaluation/gsea-enrichment-score truth_common r)
+                                                               )
+                                                            ks))))
                                   "\n")))
-              (catch Exception e (println k))))))
+              (catch Exception e (println e))))))
         )))
 
 (defn node-degrees-from-network

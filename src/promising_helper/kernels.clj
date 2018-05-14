@@ -187,13 +187,17 @@
 (defn shortest-path-kernel
   ([mat] (shortest-path-kernel mat (memoize (partial get-neighbors mat))))
   ([mat neighbor_fn]
-   (let [[m n] (cmat/shape mat)
+   (let [get_edge_fn (fn [m n]
+                       (let [v (cmat/mget mat m n)]
+                         (if (zero? v) 0.0 1.0)))
+         [m n] (cmat/shape mat)
          kern (cmat/matrix
                (pmap (fn [i]
                        (do (if (zero? (mod i 100)) (println i))
                            (shortest-paths-from
                             m
-                            (partial cmat/mget mat)
+                            ;;(partial cmat/mget mat)
+                            get_edge_fn
                             neighbor_fn i)))
                      (range m)))]
      (kernel-shell kern))))
@@ -204,4 +208,8 @@
         v (cmat/sub! (cmat/mul b (cmat/identity-matrix m))
                      (normalized-laplacian-matrix mat))]
     (kernel-shell (matrix-pow v p))))
+
+(defn amat-kernel
+  [mat]
+  (kernel-shell mat))
 
